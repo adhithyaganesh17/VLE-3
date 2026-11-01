@@ -1,0 +1,127 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: medora-default-deny
+  namespace: medora
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow DNS egress for all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: medora-allow-dns-egress
+  namespace: medora
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Frontend Ingress & Backend Egress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: medora-frontend-policy
+  namespace: medora
+spec:
+  podSelector:
+    matchLabels:
+      app: medora
+      component: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Ingress from any external / load balancer / ingress-nginx
+    - ports:
+        - protocol: TCP
+          port: 80
+  egress:
+    # Allowed egress to Backend pods only
+    - to:
+        - podSelector:
+            matchLabels:
+              app: medora
+              component: backend
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# Backend Policy: Accepts from Frontend, Egress to PostgreSQL
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: medora-backend-policy
+  namespace: medora
+spec:
+  podSelector:
+    matchLabels:
+      app: medora
+      component: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Accept traffic strictly from Frontend and Prometheus
+    - from:
+        - podSelector:
+            matchLabels:
+              app: medora
+              component: frontend
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - podSelector:
+            matchLabels:
+              app: medora-prometheus
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # Egress strictly to PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app: medora
+              component: database
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Database Policy: Accepts traffic only from Backend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: medora-database-policy
+  namespace: medora
+spec:
+  podSelector:
+    matchLabels:
+      app: medora
+      component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: medora
+              component: backend
+      ports:
+        - protocol: TCP
+          port: 5432

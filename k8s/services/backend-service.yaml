@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: medora-backend-svc
+  namespace: medora
+  labels:
+    app: medora
+    component: backend
+    service-type: routing
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  # BLUE-GREEN CUTOVER TARGET:
+  # To route traffic to GREEN, Jenkins or operator executes:
+  # kubectl patch svc medora-backend-svc -n medora -p '{"spec":{"selector":{"environment":"green"}}}'
+  selector:
+    app: medora
+    component: backend
+    environment: blue

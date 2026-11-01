@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medora-frontend-green
+  namespace: medora
+  labels:
+    app: medora
+    component: frontend
+    environment: green
+    version: "1.1.0"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: medora
+      component: frontend
+      environment: green
+  template:
+    metadata:
+      labels:
+        app: medora
+        component: frontend
+        environment: green
+        version: "1.1.0"
+    spec:
+      serviceAccountName: medora-sa
+      containers:
+        - name: frontend
+          image: medora-frontend:1.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2

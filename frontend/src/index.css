@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #0B1220;
+    color: #F8FAFC;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+/* Custom glow animations for Blue-Green indicators */
+@keyframes pulse-blue {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(56, 189, 248, 0.9);
+  }
+}
+
+@keyframes pulse-green {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(20, 184, 166, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(20, 184, 166, 0.9);
+  }
+}
+
+.env-glow-blue {
+  animation: pulse-blue 2s infinite ease-in-out;
+}
+
+.env-glow-green {
+  animation: pulse-green 2s infinite ease-in-out;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0B1220;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1E293B;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}

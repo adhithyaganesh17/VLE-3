@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: medora-postgres-config
+  namespace: medora
+data:
+  POSTGRES_DB: "medora_db"
+  POSTGRES_USER: "medora_user"

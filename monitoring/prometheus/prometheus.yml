@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: 'medora-backend-blue'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['backend-blue:8000']
+        labels:
+          environment: 'blue'
+          service: 'medora-backend'
+
+  - job_name: 'medora-backend-green'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['backend-green:8000']
+        labels:
+          environment: 'green'
+          service: 'medora-backend'
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

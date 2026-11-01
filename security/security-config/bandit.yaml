@@ -1,0 +1,20 @@
+# Bandit configuration for MEDORA Python static application security testing (SAST)
+exclude_dirs:
+  - "backend/venv"
+  - "backend/tests"
+  - ".pytest_cache"
+
+skips:
+  - "B101" # assert_used (standard in tests/type checks)
+
+profiles:
+  medora_security:
+    include:
+      - "B105" # hardcoded_password_string
+      - "B106" # hardcoded_password_funcarg
+      - "B108" # hardcoded_tmp_directory
+      - "B608" # hardcoded_sql_expressions (SQLi defense)
+      - "B301" # pickle
+      - "B403" # import_pickle
+      - "B201" # flask_debug_true
+      - "B307" # eval

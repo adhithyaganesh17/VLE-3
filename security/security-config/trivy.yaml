@@ -1,0 +1,21 @@
+# Trivy DevSecOps Security Scanner Configuration
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+
+exit-code: 0 # In advisory audit mode; set to 1 in CI for blocking gates
+ignore-unfixed: true
+
+format: "table"
+
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+
+vulnerability:
+  type:
+    - os
+    - library

@@ -1,0 +1,30 @@
+title = "MEDORA DevSecOps Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for synthetic test credentials and documentation"
+paths = [
+    '''backend/tests/.*''',
+    '''docs/.*''',
+    '''monitoring/grafana/.*'''
+]
+regexes = [
+    '''Role@12345''',
+    '''Admin@12345''',
+    '''Doctor@12345''',
+    '''Patient@12345'''
+]
+
+[[rules]]
+id = "medora-jwt-secret"
+description = "Detect hardcoded JWT secret tokens in code"
+regex = '''(?i)(jwt_secret|secret_key)\s*[:=]\s*['"][a-zA-Z0-9_\-]{20,}['"]'''
+tags = ["security", "jwt", "hipaa"]
+
+[[rules]]
+id = "medora-database-password"
+description = "Detect plaintext database passwords"
+regex = '''(?i)(postgres_password|database_password)\s*[:=]\s*['"][^'"]+['"]'''
+tags = ["security", "database", "hipaa"]

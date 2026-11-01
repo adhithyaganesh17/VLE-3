@@ -1,0 +1,134 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Active Environment (1=Blue, 2=Green)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "medora_active_environment",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "BLUE ACTIVE", "color": "blue" }, "2": { "text": "GREEN ACTIVE", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }, { "color": "green", "value": 2 }] }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Total HTTP Request Count",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(medora_http_requests_total)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "P95 Request Latency (seconds)",
+      "type": "gauge",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(medora_http_request_duration_seconds_bucket[5m])) by (le))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.2 },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "5xx Server Errors (Zero Allowed)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(medora_http_requests_total{status_code=~\"5..\"}) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 5,
+      "title": "HTTP Request Rate by Endpoint (req/sec)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(medora_http_requests_total[1m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "id": 6,
+      "title": "HTTP Traffic Distribution by Environment",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(medora_http_requests_total[1m])) by (environment)",
+          "legendFormat": "Environment: {{environment}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["medora", "healthcare", "devops", "blue-green"],
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "MEDORA — Healthcare Operations & Blue-Green Telemetry",
+  "uid": "medora-telemetry-dash",
+  "version": 1
+}

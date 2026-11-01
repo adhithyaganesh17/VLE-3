@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: medora-sa
+  namespace: medora
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: medora-role
+  namespace: medora
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: medora-role-binding
+  namespace: medora
+subjects:
+  - kind: ServiceAccount
+    name: medora-sa
+    namespace: medora
+roleRef:
+  kind: Role
+  name: medora-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# CI/CD Jenkins Deployer Role for Automated Blue-Green Cutover
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: medora-jenkins-deployer-role
+  namespace: medora
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: medora-jenkins-deployer-binding
+  namespace: medora
+subjects:
+  - kind: ServiceAccount
+    name: medora-sa
+    namespace: medora
+roleRef:
+  kind: Role
+  name: medora-jenkins-deployer-role
+  apiGroup: rbac.authorization.k8s.io
