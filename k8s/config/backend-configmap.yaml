@@ -8,7 +8,7 @@ data:
   APP_VERSION: "1.0.0"
   DEBUG: "false"
   LOG_LEVEL: "INFO"
-  CORS_ORIGINS: "*"
+  CORS_ORIGINS: '["*"]'
   DATABASE_HOST: "medora-postgres-svc"
   DATABASE_PORT: "5432"
   DATABASE_NAME: "medora_db"

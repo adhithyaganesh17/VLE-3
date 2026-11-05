@@ -1,5 +1,7 @@
+
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: medora-frontend-blue
   namespace: medora
@@ -8,18 +10,22 @@ metadata:
     component: frontend
     environment: blue
     version: "1.0.0"
+
 spec:
   replicas: 2
+
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
+
   selector:
     matchLabels:
       app: medora
       component: frontend
       environment: blue
+
   template:
     metadata:
       labels:
@@ -27,15 +33,35 @@ spec:
         component: frontend
         environment: blue
         version: "1.0.0"
+
     spec:
       serviceAccountName: medora-sa
+
+      # Pod-level security
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+
       containers:
         - name: frontend
           image: medora-frontend:1.0.0
           imagePullPolicy: IfNotPresent
+
+          # Container-level security
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: http
+              protocol: TCP
+
           resources:
             requests:
               cpu: 50m
@@ -43,17 +69,19 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+
           livenessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 3
+
           readinessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 2

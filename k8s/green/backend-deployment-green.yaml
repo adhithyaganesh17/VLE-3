@@ -34,9 +34,11 @@ spec:
         runAsUser: 10001
         runAsGroup: 10001
         fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: backend
-          image: medora-backend:1.1.0
+          image: medora-backend:1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

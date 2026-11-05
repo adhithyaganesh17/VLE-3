@@ -1,73 +1,123 @@
+
 #!/usr/bin/env bash
-# ==============================================================================
-# MEDORA — Zero-Downtime Blue-Green Automated Cutover Script
-# ==============================================================================
-set -eo pipefail
+# MEDORA - Safe Blue-Green Traffic Cutover
+
+set -Eeuo pipefail
 
 NAMESPACE="${K8S_NAMESPACE:-medora}"
 BACKEND_SVC="medora-backend-svc"
 FRONTEND_SVC="medora-frontend-svc"
-TIMEOUT_SECONDS=90
+TIMEOUT_SECONDS=120
 
-echo "----------------------------------------------------------------------"
-echo " [MEDORA] Initiating Automated Blue-Green Cutover in namespace: $NAMESPACE"
-echo "----------------------------------------------------------------------"
+KUBECTL=(kubectl)
 
-# 1. Determine currently active environment from Kubernetes backend service selector
-if command -v kubectl &> /dev/null && kubectl get svc "$BACKEND_SVC" -n "$NAMESPACE" &> /dev/null; then
-    CURRENT_ENV=$(kubectl get svc "$BACKEND_SVC" -n "$NAMESPACE" -o jsonpath='{.spec.selector.environment}')
-else
-    echo ">> [SIMULATION MODE] Reading active environment from backend API..."
-    CURRENT_ENV=$(curl -s http://localhost:8000/health | grep -o '"environment":"[^"]*' | cut -d'"' -f4 || echo "blue")
-    CURRENT_ENV=$(echo "$CURRENT_ENV" | tr '[:upper:]' '[:lower:]')
+echo "=============================================="
+echo " MEDORA BLUE-GREEN CUTOVER"
+echo " Namespace: $NAMESPACE"
+echo "=============================================="
+
+
+# Discover current production environment
+CURRENT_ENV=$("${KUBECTL[@]}" get svc "$BACKEND_SVC" \
+    -n "$NAMESPACE" -o jsonpath='{.spec.selector.environment}')
+
+FRONTEND_CURRENT=$("${KUBECTL[@]}" get svc "$FRONTEND_SVC" \
+    -n "$NAMESPACE" -o jsonpath='{.spec.selector.environment}')
+
+if [[ "$CURRENT_ENV" != "$FRONTEND_CURRENT" ]]; then
+    echo "ERROR: Backend and frontend environments differ."
+    exit 1
 fi
 
-echo ">> Current Active Environment: [ ${CURRENT_ENV^^} ]"
+if [[ "$CURRENT_ENV" != "blue" && "$CURRENT_ENV" != "green" ]]; then
+    echo "ERROR: Unknown active environment: $CURRENT_ENV"
+    exit 1
+fi
 
-# 2. Determine inactive candidate target
-if [ "$CURRENT_ENV" == "blue" ]; then
+if [[ "$CURRENT_ENV" == "blue" ]]; then
     TARGET_ENV="green"
-    TARGET_VERSION="1.1.0"
 else
     TARGET_ENV="blue"
-    TARGET_VERSION="1.0.0"
 fi
 
-echo ">> Candidate Target Environment: [ ${TARGET_ENV^^} ] (Version: $TARGET_VERSION)"
+echo "Current environment: $CURRENT_ENV"
+echo "Candidate environment: $TARGET_ENV"
 
-# 3. Apply deployment to candidate environment if running against real Kubernetes
-if command -v kubectl &> /dev/null && kubectl get ns "$NAMESPACE" &> /dev/null; then
-    echo ">> Applying manifest: k8s/$TARGET_ENV/backend-deployment-$TARGET_ENV.yaml..."
-    kubectl apply -f "k8s/$TARGET_ENV/backend-deployment-$TARGET_ENV.yaml" -n "$NAMESPACE"
-    kubectl apply -f "k8s/$TARGET_ENV/frontend-deployment-$TARGET_ENV.yaml" -n "$NAMESPACE"
+# Verify candidate deployments
+for COMPONENT in backend frontend; do
+    DEPLOYMENT="medora-${COMPONENT}-${TARGET_ENV}"
 
-    echo ">> Waiting for rollout to complete on medora-backend-$TARGET_ENV..."
-    kubectl rollout status "deployment/medora-backend-$TARGET_ENV" -n "$NAMESPACE" --timeout="${TIMEOUT_SECONDS}s"
-    kubectl rollout status "deployment/medora-frontend-$TARGET_ENV" -n "$NAMESPACE" --timeout="${TIMEOUT_SECONDS}s"
+    echo "Checking $DEPLOYMENT..."
 
-    # 4. Probe health of candidate pods before switching traffic
-    echo ">> Verifying candidate deployment health..."
-    CANDIDATE_POD=$(kubectl get pods -n "$NAMESPACE" -l "app=medora,component=backend,environment=$TARGET_ENV" -o jsonpath='{.items[0].metadata.name}')
-    kubectl exec -n "$NAMESPACE" "$CANDIDATE_POD" -- curl -sf http://localhost:8000/ready > /dev/null || {
-        echo "!! CRITICAL: Candidate pod $CANDIDATE_POD failed readiness probe! Aborting cutover."
+    "${KUBECTL[@]}" rollout status \
+        "deployment/$DEPLOYMENT" \
+        -n "$NAMESPACE" \
+        --timeout="${TIMEOUT_SECONDS}s"
+
+    READY=$("${KUBECTL[@]}" get deployment "$DEPLOYMENT" \
+        -n "$NAMESPACE" \
+        -o jsonpath='{.status.readyReplicas}')
+
+    DESIRED=$("${KUBECTL[@]}" get deployment "$DEPLOYMENT" \
+        -n "$NAMESPACE" \
+        -o jsonpath='{.spec.replicas}')
+
+    if [[ "$READY" != "$DESIRED" ]]; then
+        echo "ERROR: $DEPLOYMENT is not fully ready."
         exit 1
-    }
+    fi
+done
+if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    echo "DRY RUN: All candidate checks passed."
+    echo "DRY RUN: Would switch traffic from $CURRENT_ENV to $TARGET_ENV."
+    echo "DRY RUN: No production Services were changed."
+    exit 0
+fi
+echo "Switching production traffic to $TARGET_ENV..."
 
-    # 5. Atomic Service Selector Switch (Cutover)
-    echo ">> Candidate verified healthy. Switching production traffic to $TARGET_ENV..."
-    kubectl patch svc "$BACKEND_SVC" -n "$NAMESPACE" -p "{\"spec\":{\"selector\":{\"environment\":\"$TARGET_ENV\"}}}"
-    kubectl patch svc "$FRONTEND_SVC" -n "$NAMESPACE" -p "{\"spec\":{\"selector\":{\"environment\":\"$TARGET_ENV\"}}}"
+rollback() {
+    echo "ERROR: Cutover failed. Restoring $CURRENT_ENV..."
 
-    echo ">> Successfully patched Service selectors to environment: $TARGET_ENV"
-else
-    # Demonstration fallback using API toggle
-    echo ">> Simulated cluster environment: calling /api/devops/switch-env..."
-    curl -s -X POST "http://localhost:8000/api/devops/switch-env?target_environment=$TARGET_ENV" || true
-    echo ">> Successfully updated environment to $TARGET_ENV"
+    "${KUBECTL[@]}" patch svc "$BACKEND_SVC" \
+        -n "$NAMESPACE" \
+        --type=merge \
+        -p "{\"spec\":{\"selector\":{\"environment\":\"$CURRENT_ENV\"}}}" || true
+
+    "${KUBECTL[@]}" patch svc "$FRONTEND_SVC" \
+        -n "$NAMESPACE" \
+        --type=merge \
+        -p "{\"spec\":{\"selector\":{\"environment\":\"$CURRENT_ENV\"}}}" || true
+}
+
+if ! "${KUBECTL[@]}" patch svc "$BACKEND_SVC" \
+    -n "$NAMESPACE" --type=merge \
+    -p "{\"spec\":{\"selector\":{\"environment\":\"$TARGET_ENV\"}}}"; then
+    rollback
+    exit 1
 fi
 
-echo ""
-echo "======================================================================"
-echo " CUTOVER COMPLETE: Production traffic is now routed to [ ${TARGET_ENV^^} ]"
-echo " Zero downtime achieved. Previous [ ${CURRENT_ENV^^} ] retained for instant rollback."
-echo "======================================================================"
+if ! "${KUBECTL[@]}" patch svc "$FRONTEND_SVC" \
+    -n "$NAMESPACE" --type=merge \
+    -p "{\"spec\":{\"selector\":{\"environment\":\"$TARGET_ENV\"}}}"; then
+    rollback
+    exit 1
+fi
+
+# Verify both selectors after switching
+BACKEND_ACTIVE=$("${KUBECTL[@]}" get svc "$BACKEND_SVC" \
+    -n "$NAMESPACE" -o jsonpath='{.spec.selector.environment}')
+
+FRONTEND_ACTIVE=$("${KUBECTL[@]}" get svc "$FRONTEND_SVC" \
+    -n "$NAMESPACE" -o jsonpath='{.spec.selector.environment}')
+
+if [[ "$BACKEND_ACTIVE" != "$TARGET_ENV" || \
+      "$FRONTEND_ACTIVE" != "$TARGET_ENV" ]]; then
+    rollback
+    exit 1
+fi
+
+echo "=============================================="
+echo " CUTOVER SUCCESSFUL"
+echo " Production environment: $TARGET_ENV"
+echo " Previous environment: $CURRENT_ENV"
+echo "=============================================="

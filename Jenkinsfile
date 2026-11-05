@@ -19,7 +19,7 @@ pipeline {
         DOCKER_REGISTRY = 'registry.hub.docker.com/medora'
         K8S_NAMESPACE = 'medora'
         IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'}"
-        
+
         // Credentials IDs configured in Jenkins Credentials Manager
         REGISTRY_CRED_ID = 'docker-registry-credentials'
         SONAR_CRED_ID = 'sonarqube-token'
@@ -55,7 +55,7 @@ pipeline {
                     python3 -m venv venv || true
                     . venv/bin/activate
                     pip install --no-cache-dir -r backend/requirements.txt
-                    
+
                     echo ">> Installing Frontend npm packages..."
                     cd frontend && npm ci --prefer-offline || npm install
                 '''
@@ -187,16 +187,18 @@ pipeline {
             }
         }
 
+
+
         // --- STAGE 10: DOCKER BUILD ---
         stage('10. Docker Build') {
             steps {
-                echo "=========================================================="
-                echo " Stage 10: Building Hardened Container Images"
-                echo " Tags: medora-backend:${IMAGE_TAG}, medora-frontend:${IMAGE_TAG}"
-                echo "=========================================================="
+                script {
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()}"
+                    echo "Building MEDORA images with tag: ${env.IMAGE_TAG}"
+                }
                 sh '''
-                    docker build -t medora-backend:${IMAGE_TAG} -t medora-backend:latest ./backend
-                    docker build -t medora-frontend:${IMAGE_TAG} -t medora-frontend:latest ./frontend
+                    docker build -t medora-backend:${IMAGE_TAG} ./backend
+                    docker build -t medora-frontend:${IMAGE_TAG} ./frontend
                 '''
             }
         }
@@ -204,85 +206,76 @@ pipeline {
         // --- STAGE 11: DOCKER IMAGE SCAN ---
         stage('11. Docker Image Scan') {
             steps {
-                echo "=========================================================="
-                echo " Stage 11: Scanning Built Container Images for CVEs"
-                echo "=========================================================="
                 sh '''
-                    if command -v trivy &> /dev/null; then
-                        trivy image --severity HIGH,CRITICAL medora-backend:${IMAGE_TAG}
-                        trivy image --severity HIGH,CRITICAL medora-frontend:${IMAGE_TAG}
+                    if command -v trivy >/dev/null 2>&1; then
+                        trivy image --severity HIGH,CRITICAL --exit-code 1 medora-backend:${IMAGE_TAG}
+                        trivy image --severity HIGH,CRITICAL --exit-code 1 medora-frontend:${IMAGE_TAG}
                     else
-                        echo ">> Docker image scan gate: Minimal slim images verified."
+                        echo "WARNING: Trivy is not installed. Image scan was skipped."
                     fi
                 '''
             }
         }
 
-        // --- STAGE 12: PUSH IMAGE TO REGISTRY ---
-        stage('12. Push Image to Registry') {
+        // --- STAGE 12: LOCAL IMAGE DELIVERY ---
+        stage('12. Local Image Delivery') {
             steps {
-                echo "=========================================================="
-                echo " Stage 12: Pushing Images to Container Registry"
-                echo "=========================================================="
-                script {
-                    try {
-                        withCredentials([usernamePassword(credentialsId: env.REGISTRY_CRED_ID, usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
-                            sh '''
-                                echo "$REG_PASS" | docker login -u "$REG_USER" --password-stdin
-                                docker tag medora-backend:${IMAGE_TAG} ${DOCKER_REGISTRY}-backend:${IMAGE_TAG}
-                                docker tag medora-frontend:${IMAGE_TAG} ${DOCKER_REGISTRY}-frontend:${IMAGE_TAG}
-                                docker push ${DOCKER_REGISTRY}-backend:${IMAGE_TAG}
-                                docker push ${DOCKER_REGISTRY}-frontend:${IMAGE_TAG}
-                            '''
-                        }
-                    } catch (Exception e) {
-                        echo ">> Registry credentials '${env.REGISTRY_CRED_ID}' not configured or running in offline lab."
-                        echo ">> Using locally tagged images on Kubernetes node."
-                    }
-                }
+                echo "Using local Docker images and the restricted K3s import helper."
+                echo "External registry push is disabled for this AWS lab deployment."
             }
         }
 
         // --- STAGE 13: KUBERNETES CANDIDATE DEPLOYMENT ---
         stage('13. Kubernetes Deployment') {
             steps {
-                echo "=========================================================="
-                echo " Stage 13: Deploying Candidate Version to Inactive Slot"
-                echo " Target Environment: ${params.DEPLOY_TARGET}"
-                echo "=========================================================="
                 sh '''
-                    # Execute pre-flight manifest validation
-                    kubectl apply -f k8s/namespace.yaml --dry-run=client || true
-                    kubectl apply -f k8s/config/ --dry-run=client || true
-                    kubectl apply -f k8s/security/ --dry-run=client || true
-
-                    echo ">> Candidate deployed successfully."
+                    bash jenkins/scripts/deploy-candidate.sh
                 '''
             }
         }
 
-        // --- STAGE 14: HEALTH VERIFICATION & SYNTHETIC SMOKE TESTS ---
+        // --- STAGE 14: CANDIDATE HEALTH VERIFICATION ---
         stage('14. Health Verification') {
             steps {
-                echo "=========================================================="
-                echo " Stage 14: Automated Health Probes on Candidate Application"
-                echo "=========================================================="
                 sh '''
-                    chmod +x jenkins/scripts/verify-health.sh
-                    ./jenkins/scripts/verify-health.sh http://localhost:8000 || echo ">> Standby environment verified."
+                    set -euo pipefail
+                    export KUBECONFIG=/var/lib/jenkins/.kube/config
+                    TARGET_ENV=$(cat .medora-target-env)
+
+                    echo "Verifying candidate environment: $TARGET_ENV"
+
+                    for COMPONENT in backend frontend; do
+                        DEPLOYMENT="medora-${COMPONENT}-${TARGET_ENV}"
+
+                        kubectl rollout status deployment/"$DEPLOYMENT" \
+                            -n medora --timeout=180s
+
+                        DESIRED=$(kubectl get deployment "$DEPLOYMENT" \
+                            -n medora -o jsonpath='{.spec.replicas}')
+                        READY=$(kubectl get deployment "$DEPLOYMENT" \
+                            -n medora -o jsonpath='{.status.readyReplicas}')
+
+                        if [[ -z "$READY" || "$READY" != "$DESIRED" ]]; then
+                            echo "ERROR: $DEPLOYMENT is not fully ready."
+                            exit 1
+                        fi
+                    done
+
+                    kubectl get pods -n medora \
+                        -l app=medora,environment="$TARGET_ENV" -o wide
+
+                    echo "Candidate deployments are ready."
                 '''
             }
         }
 
-        // --- STAGE 15: BLUE-GREEN TRAFFIC CUTOVER & REPORT ---
-        stage('15. Blue-Green Cutover & Report') {
+        // --- STAGE 15: BLUE-GREEN CUTOVER DRY RUN ---
+        stage('15. Blue-Green Cutover Dry Run') {
             steps {
-                echo "=========================================================="
-                echo " Stage 15: Executing Atomic Service Selector Cutover"
-                echo "=========================================================="
                 sh '''
-                    chmod +x jenkins/scripts/switch-blue-green.sh
-                    ./jenkins/scripts/switch-blue-green.sh
+                    DRY_RUN=true \
+                    KUBECONFIG=/var/lib/jenkins/.kube/config \
+                    bash /var/lib/jenkins/medora-scripts/switch-blue-green.sh
                 '''
             }
         }
@@ -291,20 +284,16 @@ pipeline {
     post {
         success {
             echo "=========================================================="
-            echo " [PIPELINE SUCCESS] MEDORA Build #${env.BUILD_NUMBER} Deployed!"
-            echo " Zero downtime Blue-Green cutover completed."
+            echo " [PIPELINE SUCCESS] MEDORA candidate build #${env.BUILD_NUMBER} verified!"
+            echo " Candidate is ready; production traffic remains on the existing environment."
             echo " Security Gates: Gitleaks (PASSED), Bandit (PASSED), Trivy (PASSED)"
             echo "=========================================================="
         }
         failure {
             echo "=========================================================="
-            echo " [PIPELINE FAILURE] Deployment or health check failed!"
-            echo " Initiating automatic rollback to preserve production uptime..."
+            echo " [PIPELINE FAILURE] Build, deployment, or verification failed!"
+            echo " Production traffic was not intentionally switched by this first-run pipeline."
             echo "=========================================================="
-            sh '''
-                chmod +x jenkins/scripts/rollback.sh
-                ./jenkins/scripts/rollback.sh || true
-            '''
         }
         always {
             cleanWs deleteDirs: true, notFailBuild: true
